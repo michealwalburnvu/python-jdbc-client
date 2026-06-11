@@ -29,11 +29,11 @@ Fill in `.env`:
 ## Use
 
 ```bash
-.venv/bin/python dqe_client.py ping                       # verify connection
-.venv/bin/python dqe_client.py tables --like "%Variant%"  # find tables
-.venv/bin/python dqe_client.py columns Variant            # inspect a table
-.venv/bin/python dqe_client.py query "SELECT TOP 10 * FROM dbo.Variant"
-.venv/bin/python dqe_client.py file queries/dump.sql      # run SQL from a file
+.venv/bin/python jdbc_client.py ping                       # verify connection
+.venv/bin/python jdbc_client.py tables --like "%Variant%"  # find tables
+.venv/bin/python jdbc_client.py columns Variant            # inspect a table
+.venv/bin/python jdbc_client.py query "SELECT TOP 10 * FROM dbo.Variant"
+.venv/bin/python jdbc_client.py file queries/dump.sql      # run SQL from a file
 ```
 
 Output: aligned text by default; add `--json` or `--csv`. Row cap is `--limit 200`
@@ -55,13 +55,13 @@ MSSQL_PASSWORD=...
 Then select it with `--profile`:
 
 ```bash
-.venv/bin/python dqe_client.py --profile warehouse tables --like "%Order%"
+.venv/bin/python jdbc_client.py --profile warehouse tables --like "%Order%"
 ```
 
 Or override per-invocation without a file (process env wins over `.env`):
 
 ```bash
-MSSQL_SERVER=host MSSQL_DATABASE=Other .venv/bin/python dqe_client.py ping
+MSSQL_SERVER=host MSSQL_DATABASE=Other .venv/bin/python jdbc_client.py ping
 ```
 
 (The `MSSQL_*` names are just the connection variables — they apply to whatever DB
