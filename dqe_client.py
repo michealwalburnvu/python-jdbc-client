@@ -31,13 +31,21 @@ import sys
 import jpype
 import jaydebeapi
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-except Exception:
-    pass
-
 _HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_env(profile=None):
+    """Load connection vars from .env (default) or .env.<profile> for another DB.
+
+    Pre-existing process env vars win (override=False), so per-invocation
+    `MSSQL_SERVER=... MSSQL_DATABASE=... python dqe_client.py ...` also works.
+    """
+    try:
+        from dotenv import load_dotenv
+    except Exception:
+        return
+    fname = f".env.{profile}" if profile else ".env"
+    load_dotenv(os.path.join(_HERE, fname), override=False)
 _DRIVER_JAR = os.path.join(_HERE, "lib", "mssql-jdbc.jar")
 _DRIVER_CLASS = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
 
@@ -103,15 +111,15 @@ def _bool_str(name, default="true"):
 
 
 def _split_domain_user():
-    """Return (domain, user) from DQE_DB_USER (DOMAIN\\user) and/or DQE_DB_DOMAIN."""
-    raw = _env("DQE_DB_USER", required=True)
-    domain = _env("DQE_DB_DOMAIN")
+    """Return (domain, user) from MSSQL_USER (DOMAIN\\user) and/or MSSQL_DOMAIN."""
+    raw = _env("MSSQL_USER", required=True)
+    domain = _env("MSSQL_DOMAIN")
     user = raw
     if "\\" in raw:
         parsed_domain, user = raw.split("\\", 1)
         domain = domain or parsed_domain
     if not domain:
-        sys.exit("Missing domain: set DQE_DB_DOMAIN or use DQE_DB_USER=DOMAIN\\user")
+        sys.exit("Missing domain: set MSSQL_DOMAIN or use MSSQL_USER=DOMAIN\\user")
     return domain, user
 
 
@@ -125,14 +133,14 @@ def _ensure_jvm():
 
 
 def connect():
-    server = _env("DQE_DB_SERVER", required=True)
-    database = _env("DQE_DB_DATABASE", required=True)
-    port = _env("DQE_DB_PORT", "1433")
-    timeout = _env("DQE_DB_TIMEOUT", "30")
-    password = _env("DQE_DB_PASSWORD", required=True)
+    server = _env("MSSQL_SERVER", required=True)
+    database = _env("MSSQL_DATABASE", required=True)
+    port = _env("MSSQL_PORT", "1433")
+    timeout = _env("MSSQL_TIMEOUT", "30")
+    password = _env("MSSQL_PASSWORD", required=True)
     domain, user = _split_domain_user()
-    encrypt = _bool_str("DQE_DB_ENCRYPT", "true")
-    trust = _bool_str("DQE_DB_TRUST_SERVER_CERT", "true")
+    encrypt = _bool_str("MSSQL_ENCRYPT", "true")
+    trust = _bool_str("MSSQL_TRUST_SERVER_CERT", "true")
 
     url = (
         f"jdbc:sqlserver://{server}:{port};"
@@ -265,6 +273,8 @@ def build_parser():
                    help="output CSV")
     p.add_argument("--limit", type=int, default=200, help="max rows to show (default 200)")
     p.add_argument("--all", action="store_true", help="show all rows")
+    p.add_argument("--profile", help="connection profile: load .env.<profile> instead of .env "
+                                     "(point at any SQL Server DB)")
 
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -291,6 +301,7 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
+    _load_env(getattr(args, "profile", None))
     try:
         args.func(args)
     except UnsafeQueryError as e:

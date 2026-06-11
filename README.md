@@ -19,10 +19,10 @@ cp .env.example .env        # then edit with host, db, and DOMAIN\user creds
 ```
 
 Fill in `.env`:
-- `DQE_DB_SERVER` — the cname / host
-- `DQE_DB_DATABASE` — the database name
-- `DQE_DB_USER` — `DOMAIN\your.user` (or set `DQE_DB_DOMAIN` + bare user)
-- `DQE_DB_PASSWORD` — your Windows password
+- `MSSQL_SERVER` — the cname / host
+- `MSSQL_DATABASE` — the database name
+- `MSSQL_USER` — `DOMAIN\your.user` (or set `MSSQL_DOMAIN` + bare user)
+- `MSSQL_PASSWORD` — your Windows password
 
 `encrypt` and `trustServerCertificate` default to `true`. `.env` is gitignored.
 
@@ -38,6 +38,34 @@ Fill in `.env`:
 
 Output: aligned text by default; add `--json` or `--csv`. Row cap is `--limit 200`
 by default; use `--all` for everything.
+
+## Other SQL Server databases (profiles)
+
+The client works against **any** SQL Server DB. `.env` holds your primary/default
+connection (set `MSSQL_DATABASE` to whatever database you want); add a profile file
+per additional server, e.g. `.env.warehouse`:
+
+```
+MSSQL_SERVER=warehouse.example.com
+MSSQL_DATABASE=Warehouse
+MSSQL_USER=DOMAIN\micheal.walburn
+MSSQL_PASSWORD=...
+```
+
+Then select it with `--profile`:
+
+```bash
+.venv/bin/python dqe_client.py --profile warehouse tables --like "%Order%"
+```
+
+Or override per-invocation without a file (process env wins over `.env`):
+
+```bash
+MSSQL_SERVER=host MSSQL_DATABASE=Other .venv/bin/python dqe_client.py ping
+```
+
+(The `MSSQL_*` names are just the connection variables — they apply to whatever DB
+you point at.)
 
 ## Safety
 
