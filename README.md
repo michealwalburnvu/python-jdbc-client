@@ -1,6 +1,6 @@
-# DQE read-only DB client (JDBC)
+# Python read-only DB client (JDBC)
 
-A small, **read-only** SQL Server client for inspecting the DQE database (variant
+A small, **read-only** SQL Server client for inspecting SQL Server databases (variant
 definitions, question groups, Encompass field mappings, etc.). Uses the official
 **Microsoft JDBC driver** with Windows-domain (NTLM) auth and an encrypted
 connection that trusts the server cert — the JDBC equivalent of
