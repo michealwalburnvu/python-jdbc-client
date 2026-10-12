@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Read-only SQL Server client for the DQE database (via the Microsoft JDBC driver).
 
-Connects with Windows-domain (NTLM) credentials supplied via a local .env file,
-with an encrypted connection that trusts the server certificate
+Authenticates with the Kerberos ticket already held in the macOS credential
+cache (run `kinit` or `klist` to check), so no password is stored anywhere.
+Uses an encrypted connection that trusts the server certificate
 (encrypt=true; trustServerCertificate=true). Runs SELECT-only queries: a guard
 rejects anything that could mutate the database, and the JDBC connection is set
 read-only.
@@ -11,11 +12,11 @@ Driven through JayDeBeApi/JPype against a project-local JRE and the bundled
 mssql-jdbc jar — nothing is installed on the host.
 
 Usage:
-    python dqe_client.py ping
-    python dqe_client.py tables [--like PATTERN]
-    python dqe_client.py columns TABLE_NAME
-    python dqe_client.py query "SELECT TOP 10 * FROM dbo.Variant"
-    python dqe_client.py file path/to/query.sql
+    python jdbc_client.py ping
+    python jdbc_client.py tables [--like PATTERN]
+    python jdbc_client.py columns TABLE_NAME
+    python jdbc_client.py query "SELECT TOP 10 * FROM dbo.Variant"
+    python jdbc_client.py file path/to/query.sql
 
 Output options: --json, --csv, --limit N (default 200), --all.
 """
@@ -26,6 +27,7 @@ import io
 import json
 import os
 import re
+import socket
 import sys
 
 import jpype
@@ -38,7 +40,7 @@ def _load_env(profile=None):
     """Load connection vars from .env (default) or .env.<profile> for another DB.
 
     Pre-existing process env vars win (override=False), so per-invocation
-    `MSSQL_SERVER=... MSSQL_DATABASE=... python dqe_client.py ...` also works.
+    `MSSQL_SERVER=... MSSQL_DATABASE=... python jdbc_client.py ...` also works.
     """
     try:
         from dotenv import load_dotenv
@@ -110,17 +112,16 @@ def _bool_str(name, default="true"):
     return "true" if _env(name, default).lower() in ("1", "true", "yes") else "false"
 
 
-def _split_domain_user():
-    """Return (domain, user) from MSSQL_USER (DOMAIN\\user) and/or MSSQL_DOMAIN."""
-    raw = _env("MSSQL_USER", required=True)
-    domain = _env("MSSQL_DOMAIN")
-    user = raw
-    if "\\" in raw:
-        parsed_domain, user = raw.split("\\", 1)
-        domain = domain or parsed_domain
-    if not domain:
-        sys.exit("Missing domain: set MSSQL_DOMAIN or use MSSQL_USER=DOMAIN\\user")
-    return domain, user
+def _service_principal_name(server, port):
+    """SQL Server SPNs are registered on the canonical host, so follow any CNAME first."""
+    explicit = _env("MSSQL_SPN")
+    if explicit:
+        return explicit
+    try:
+        canonical_host = socket.gethostbyname_ex(server)[0]
+    except socket.gaierror as e:
+        sys.exit(f"Cannot resolve {server}: {e} (is the VPN connected?)")
+    return f"MSSQLSvc/{canonical_host}:{port}"
 
 
 def _ensure_jvm():
@@ -137,10 +138,9 @@ def connect():
     database = _env("MSSQL_DATABASE", required=True)
     port = _env("MSSQL_PORT", "1433")
     timeout = _env("MSSQL_TIMEOUT", "30")
-    password = _env("MSSQL_PASSWORD", required=True)
-    domain, user = _split_domain_user()
     encrypt = _bool_str("MSSQL_ENCRYPT", "true")
     trust = _bool_str("MSSQL_TRUST_SERVER_CERT", "true")
+    service_principal_name = _service_principal_name(server, port)
 
     url = (
         f"jdbc:sqlserver://{server}:{port};"
@@ -148,14 +148,24 @@ def connect():
         f"encrypt={encrypt};"
         f"trustServerCertificate={trust};"
         f"integratedSecurity=true;"
-        f"authenticationScheme=NTLM;"
-        f"domain={domain};"
+        f"authenticationScheme=JavaKerberos;"
+        f"serverSpn={service_principal_name};"
         f"loginTimeout={timeout};"
         f"applicationName=dqe-readonly-client"
     )
 
     _ensure_jvm()
-    conn = jaydebeapi.connect(_DRIVER_CLASS, url, {"user": user, "password": password})
+    try:
+        conn = jaydebeapi.connect(_DRIVER_CLASS, url, {})
+    except Exception as e:
+        message = str(e)
+        if "Integrated authentication failed" in message or "GSSException" in message:
+            sys.exit(
+                f"Kerberos login failed for {service_principal_name}: {message}\n"
+                "Check `klist` for a valid ticket (run `kinit` if expired) and that the VPN is up. "
+                "If the SPN is wrong, set MSSQL_SPN explicitly."
+            )
+        raise
     try:
         conn.jconn.setReadOnly(True)
     except Exception:
@@ -198,7 +208,7 @@ def _fetch(sql):
         cur = conn.cursor()
         try:
             cur.execute(statement)
-            columns = [d[0] for d in cur.description] if cur.description else []
+            columns = [str(d[0]) for d in cur.description] if cur.description else []
             rows = cur.fetchall()
             return columns, rows
         finally:

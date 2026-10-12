@@ -2,9 +2,10 @@
 
 A small, **read-only** SQL Server client for inspecting SQL Server databases (variant
 definitions, question groups, Encompass field mappings, etc.). Uses the official
-**Microsoft JDBC driver** with Windows-domain (NTLM) auth and an encrypted
-connection that trusts the server cert — the JDBC equivalent of
-`encrypt=true;trustServerCertificate=true`.
+**Microsoft JDBC driver** with Kerberos auth (`authenticationScheme=JavaKerberos`)
+and an encrypted connection that trusts the server cert — the JDBC equivalent of
+`encrypt=true;trustServerCertificate=true`. No password is stored anywhere: the
+JVM reads the ticket already in your macOS Kerberos credential cache.
 
 Nothing is installed on the host: a project-local Temurin JRE (`.jdk/`) and the
 `mssql-jdbc` jar (`lib/`) are bundled, and the driver is driven from Python via
@@ -14,17 +15,32 @@ JayDeBeApi/JPype so the CLI and read-only guard stay in one place.
 
 ```bash
 cd dqe-db-client
-cp .env.example .env        # then edit with host, db, and DOMAIN\user creds
+cp .env.example .env        # then edit with host and db
+klist                       # confirm you hold a Kerberos ticket; `kinit` if not
 # Already provisioned: .venv (deps), .jdk (local JRE 17), lib/mssql-jdbc.jar
 ```
 
 Fill in `.env`:
 - `MSSQL_SERVER` — the cname / host
 - `MSSQL_DATABASE` — the database name
-- `MSSQL_USER` — `DOMAIN\your.user` (or set `MSSQL_DOMAIN` + bare user)
-- `MSSQL_PASSWORD` — your Windows password
+- `MSSQL_SPN` — optional; only if the auto-derived SPN is wrong (see below)
 
 `encrypt` and `trustServerCertificate` default to `true`. `.env` is gitignored.
+
+## Kerberos
+
+- You must be on the VPN and hold a valid ticket (`klist`). Get one with `kinit`
+  if it has expired; the Kerberos SSO extension normally issues one at login.
+- The JVM reads the native macOS credential cache directly (`libosxkrb5`), so no
+  `KRB5CCNAME`, keytab, or JAAS file is needed.
+- SQL Server SPNs are registered on the **canonical** host name, not the friendly
+  cname. The client follows the CNAME chain and requests
+  `MSSQLSvc/<canonical-host>:<port>`. If a server's SPN differs, set `MSSQL_SPN`
+  in the profile. To check which SPN the KDC knows:
+  `kgetcred MSSQLSvc/<host>:1433`.
+- Failure modes: `Server not found in Kerberos database` → wrong SPN;
+  `No valid credentials provided` / `Integrated authentication failed` → no or
+  expired ticket; `TCP/IP connection ... failed` with an unresolved host → VPN down.
 
 ## Use
 
@@ -48,8 +64,6 @@ per additional server, e.g. `.env.warehouse`:
 ```
 MSSQL_SERVER=warehouse.example.com
 MSSQL_DATABASE=Warehouse
-MSSQL_USER=DOMAIN\micheal.walburn
-MSSQL_PASSWORD=...
 ```
 
 Then select it with `--profile`:
