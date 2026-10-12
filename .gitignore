@@ -1,5 +1,6 @@
 .env
-.env.prod
+.env.*
+!.env.example
 .venv/
 .jdk/
 lib/
